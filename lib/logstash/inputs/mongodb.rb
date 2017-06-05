@@ -75,6 +75,8 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
   #config :update, :validate => :boolean, :defalut => false
 
+  config :update_time, :validate => :number, :default => 3600, :required => false
+
   SINCE_TABLE = :since_table
 
   public
@@ -337,8 +339,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
           pivot_date = Time.now
 
           #Collection documents update check (3600 secs = 1 hour)
-          if @last_update.to_i + 3600 < pivot_date.to_i
-          #if @last_update.to_i + 600 < pivot_date.to_i
+          if @last_update.to_i + @update_time < pivot_date.to_i
             s = "UPDATE TRIGGERED " + @last_update.to_s + "-" + pivot_date.to_s
             logger.info(s)
             updated_data = get_updated_documents(@mongodb, collection_name, @last_update, pivot_date)
