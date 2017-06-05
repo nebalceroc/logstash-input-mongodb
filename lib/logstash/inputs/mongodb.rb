@@ -43,7 +43,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
   config :collection, :validate => :string, :required => true
 
   # This allows you to select the method you would like to use to parse your data
-  config :parse_method, :validate => :string, :default => 'flatten'
+  config :parse_method, :validate => :string, :default => 'simple'
 
   # If not flattening you can dig to flatten select fields
   config :dig_fields, :validate => :array, :default => []
@@ -73,6 +73,8 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
   # The default, `1`, means send a message every second.
   config :interval, :validate => :number, :default => 1
 
+  #config :update, :validate => :boolean, :defalut => false
+
   SINCE_TABLE = :since_table
 
   public
@@ -80,7 +82,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     begin
       sqlitedb.create_table "#{SINCE_TABLE}" do
         String :table
-        Int :place
+        String :place
       end
     rescue
       @logger.debug("since table already exists")
@@ -152,6 +154,22 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
   end
 
   public
+  def get_updated_documents(mongodb, my_collection, start_date, end_date)
+    today_date = Time.now
+    doc_list = {}
+    @logger.info("GETTING " + my_collection + start_date.to_s + end_date.to_s)
+    col = mongodb[my_collection]
+    @logger.info(start_date.to_s)
+    @logger.info(end_date.to_s)
+    #doc_list = col.find(:visto => {:$gte => start_date,:$lt => end_date})
+  #  doc_list = col.find(:visto => {:$gte => Time.new(start_date.year,start_date.month,start_date.day,start_date.hour-1,0,0),
+  #                                 :$lt => Time.new(end_date.year,end_date.month,end_date.day,end_date.hour,0,0)})
+    doc_list = col.find(:visto => {:$gte => Time.new(today_date.year,today_date.month,today_date.day,0,0,0),
+                                    :$lt => Time.new(today_date.year,today_date.month,today_date.day+1,0,0,0)})
+    return doc_list
+  end
+
+  public
   def update_watched_collections(mongodb, collection, sqlitedb)
     collections = get_collection_names(mongodb, collection)
     collection_data = {}
@@ -180,6 +198,9 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
     # Should check to see if there are new matching tables at a predefined interval or on some trigger
     @collection_data = update_watched_collections(@mongodb, @collection, @sqlitedb)
+    #@last_update = Time.new(2000)
+    @last_update = Time.now
+
   end # def register
 
   class BSON::OrderedHash
@@ -194,7 +215,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
   def flatten(my_hash)
     new_hash = {}
-    @logger.debug("Raw Hash: #{my_hash}")
+    #@logger.debug("Raw Hash: #{my_hash}")
     if my_hash.respond_to? :each
       my_hash.each do |k1,v1|
         if v1.is_a?(Hash)
@@ -218,8 +239,56 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     else
       @logger.debug("Flatten [ERROR]: hash did not respond to :each")
     end
-    @logger.debug("Flattened Hash: #{new_hash}")
+    #@logger.debug("Flattened Hash: #{new_hash}")
     return new_hash
+  end
+
+  def process_doc(doc)
+    logdate = DateTime.parse(doc['_id'].generation_time.to_s)
+    event = LogStash::Event.new("host" => @host)
+    decorate(event)
+    event.set("logdate",logdate.iso8601.force_encoding(Encoding::UTF_8))
+    log_entry = doc.to_h.to_s
+    log_entry['_id'] = log_entry['_id'].to_s
+    event.set("log_entry",log_entry.force_encoding(Encoding::UTF_8))
+    event.set("mongo_id",doc['_id'].to_s)
+    @logger.debug("mongo_id: "+doc['_id'].to_s)
+    #@logger.debug("EVENT looks like: "+event.to_s)
+    #@logger.debug("Sent message: "+doc.to_h.to_s)
+    #@logger.debug("EVENT looks like: "+event.to_s)
+    # Extract the HOST_ID and PID from the MongoDB BSON::ObjectID
+    if @unpack_mongo_id
+      doc_hex_bytes = doc['_id'].to_s.each_char.each_slice(2).map {|b| b.join.to_i(16) }
+      doc_obj_bin = doc_hex_bytes.pack("C*").unpack("a4 a3 a2 a3")
+      host_id = doc_obj_bin[1].unpack("S")
+      process_id = doc_obj_bin[2].unpack("S")
+      event.set('host_id',host_id.first.to_i)
+      event.set('process_id',process_id.first.to_i)
+    end
+
+    if @parse_method == 'simple'
+      doc.each do |k, v|
+          if k == '_id'
+            event.set("mongo_id", doc['_id'].to_s)
+            next
+          end
+          if k.include? "@"
+            next
+          end
+          if v.is_a? Numeric
+            event.set(k, v.abs)
+          elsif v.is_a? Array
+            event.set(k, v)
+          elsif v.is_a? Hash
+            event.set(k, v)
+          elsif v == "NaN"
+            event.set(k, Float::NAN)
+          else
+            event.set(k, v.to_s)
+          end
+      end
+    end
+    return event
   end
 
   def run(queue)
@@ -228,17 +297,17 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     sleeptime = sleep_min
 
     @logger.debug("Tailing MongoDB")
-    @logger.debug("Collection data is: #{@collection_data}")
+    #@logger.debug("Collection data is: #{@collection_data}")
 
     while true && !stop?
       begin
         @collection_data.each do |index, collection|
           collection_name = collection[:name]
-          @logger.debug("collection_data is: #{@collection_data}")
+          #@logger.debug("collection_data is: #{@collection_data}")
+          @logger.debug("collection_data is: " + collection_name)
           last_id = @collection_data[index][:last_id]
           #@logger.debug("last_id is #{last_id}", :index => index, :collection => collection_name)
           # get batch of events starting at the last_place if it is set
-
 
           last_id_object = last_id
           if since_type == 'id'
@@ -250,113 +319,8 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
           end
           cursor = get_cursor_for_collection(@mongodb, collection_name, last_id_object, batch_size)
           cursor.each do |doc|
-            logdate = DateTime.parse(doc['_id'].generation_time.to_s)
-            event = LogStash::Event.new("host" => @host)
-            decorate(event)
-            event.set("logdate",logdate.iso8601.force_encoding(Encoding::UTF_8))
-            log_entry = doc.to_h.to_s
-            log_entry['_id'] = log_entry['_id'].to_s
-            event.set("log_entry",log_entry.force_encoding(Encoding::UTF_8))
-            event.set("mongo_id",doc['_id'].to_s)
-            @logger.debug("mongo_id: "+doc['_id'].to_s)
-            #@logger.debug("EVENT looks like: "+event.to_s)
-            #@logger.debug("Sent message: "+doc.to_h.to_s)
-            #@logger.debug("EVENT looks like: "+event.to_s)
-            # Extract the HOST_ID and PID from the MongoDB BSON::ObjectID
-            if @unpack_mongo_id
-              doc_hex_bytes = doc['_id'].to_s.each_char.each_slice(2).map {|b| b.join.to_i(16) }
-              doc_obj_bin = doc_hex_bytes.pack("C*").unpack("a4 a3 a2 a3")
-              host_id = doc_obj_bin[1].unpack("S")
-              process_id = doc_obj_bin[2].unpack("S")
-              event.set('host_id',host_id.first.to_i)
-              event.set('process_id',process_id.first.to_i)
-            end
 
-            if @parse_method == 'flatten'
-              # Flatten the JSON so that the data is usable in Kibana
-              flat_doc = flatten(doc)
-              # Check for different types of expected values and add them to the event
-              if flat_doc['info_message'] && (flat_doc['info_message']  =~ /collection stats: .+/)
-                # Some custom stuff I'm having to do to fix formatting in past logs...
-                sub_value = flat_doc['info_message'].sub("collection stats: ", "")
-                JSON.parse(sub_value).each do |k1,v1|
-                  flat_doc["collection_stats_#{k1.to_s}"] = v1
-                end
-              end
-
-              flat_doc.each do |k,v|
-                # Check for an integer
-                @logger.debug("key: #{k.to_s} value: #{v.to_s}")
-                if v.is_a? Numeric
-                  event.set(k.to_s,v)
-                elsif v.is_a? Time
-                  event.set(k.to_s,v.iso8601)
-
-                elsif v.is_a? String
-                  if v == "NaN"
-                    event.set(k.to_s, Float::NAN)
-                  elsif /\A[-+]?\d+[.][\d]+\z/ == v
-                    event.set(k.to_s, v.to_f)
-                  elsif (/\A[-+]?\d+\z/ === v) || (v.is_a? Integer)
-                    event.set(k.to_s, v.to_i)
-                  else
-                    event.set(k.to_s, v)
-                  end
-                else
-                  if k.to_s  == "_id" || k.to_s == "tags"
-                    event.set(k.to_s, v.to_s )
-                  end
-                  if (k.to_s == "tags") && (v.is_a? Array)
-                    event.set('tags',v)
-                  end
-                end
-              end
-            elsif @parse_method == 'dig'
-              # Dig into the JSON and flatten select elements
-              doc.each do |k, v|
-                if k != "_id"
-                  if (@dig_fields.include? k) && (v.respond_to? :each)
-                    v.each do |kk, vv|
-                      if (@dig_dig_fields.include? kk) && (vv.respond_to? :each)
-                        vv.each do |kkk, vvv|
-                          if /\A[-+]?\d+\z/ === vvv
-                            event.set("#{k}_#{kk}_#{kkk}",vvv.to_i)
-                          else
-                            event.set("#{k}_#{kk}_#{kkk}", vvv.to_s)
-                          end
-                        end
-                      else
-                        if /\A[-+]?\d+\z/ === vv
-                          event.set("#{k}_#{kk}", vv.to_i)
-                        else
-                          event.set("#{k}_#{kk}",vv.to_s)
-                        end
-                      end
-                    end
-                  else
-                    if /\A[-+]?\d+\z/ === v
-                      event.set(k,v.to_i)
-                    else
-                      event.set(k,v.to_s)
-                    end
-                  end
-                end
-              end
-            elsif @parse_method == 'simple'
-              doc.each do |k, v|
-                  if v.is_a? Numeric
-                    event.set(k, v.abs)
-                  elsif v.is_a? Array
-                    event.set(k, v)
-                  elsif v == "NaN"
-                    event.set(k, Float::NAN)
-                  else
-                    event.set(k, v.to_s)
-                  end
-              end
-            end
-
-            queue << event
+            queue << process_doc(doc)
 
             since_id = doc[since_column]
             if since_type == 'id'
@@ -369,6 +333,21 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
           end
           # Store the last-seen doc in the database
           update_placeholder(@sqlitedb, since_table, collection_name, @collection_data[index][:last_id])
+
+          pivot_date = Time.now
+
+          #Collection documents update check (3600 secs = 1 hour)
+          if @last_update.to_i + 3600 < pivot_date.to_i
+          #if @last_update.to_i + 600 < pivot_date.to_i
+            s = "UPDATE TRIGGERED " + @last_update.to_s + "-" + pivot_date.to_s
+            logger.info(s)
+            updated_data = get_updated_documents(@mongodb, collection_name, @last_update, pivot_date)
+            #logger.info(updated_data)
+            updated_data.each do |doc|
+              queue << process_doc(doc)
+            end
+            @last_update = pivot_date
+          end
         end
         @logger.debug("Updating watch collections")
         @collection_data = update_watched_collections(@mongodb, @collection, @sqlitedb)
