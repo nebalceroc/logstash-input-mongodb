@@ -157,17 +157,17 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
   public
   def get_updated_documents(mongodb, my_collection, start_date, end_date)
-    today_date = Time.now
+    today_date = Time.now.getutc
     doc_list = {}
     @logger.info("GETTING " + my_collection + start_date.to_s + end_date.to_s)
     col = mongodb[my_collection]
     @logger.info(start_date.to_s)
     @logger.info(end_date.to_s)
     #doc_list = col.find(:visto => {:$gte => start_date,:$lt => end_date})
-  #  doc_list = col.find(:visto => {:$gte => Time.new(start_date.year,start_date.month,start_date.day,start_date.hour-1,0,0),
-  #                                 :$lt => Time.new(end_date.year,end_date.month,end_date.day,end_date.hour,0,0)})
-    doc_list = col.find(:visto => {:$gte => Time.new(today_date.year,today_date.month,today_date.day,0,0,0),
-                                    :$lt => Time.new(today_date.year,today_date.month,today_date.day+1,0,0,0)})
+    doc_list = col.find(:visto => {:$gte => Time.new(start_date.year,start_date.month,start_date.day,start_date.hour,start_date.min,0),
+                                   :$lt => Time.new(end_date.year,end_date.month,end_date.day,end_date.hour,end_date.min,0)})
+    #doc_list = col.find(:visto => {:$gte => Time.new(today_date.year,today_date.month,today_date.day,0,0,0),
+          #                          :$lt => Time.new(today_date.year,today_date.month,today_date.day+1,0,0,0)})
     return doc_list
   end
 
@@ -201,7 +201,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     # Should check to see if there are new matching tables at a predefined interval or on some trigger
     @collection_data = update_watched_collections(@mongodb, @collection, @sqlitedb)
     #@last_update = Time.new(2000)
-    @last_update = Time.now
+    @last_update = Time.now.getutc
 
   end # def register
 
@@ -344,9 +344,13 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
             logger.info(s)
             updated_data = get_updated_documents(@mongodb, collection_name, @last_update, pivot_date)
             #logger.info(updated_data)
+            up_qty = 0
             updated_data.each do |doc|
+              up_qty++
               queue << process_doc(doc)
             end
+            @logger.info("FROM "+@last_update.to_s+" TO "+pivot_date.to_s)
+            @logger.info("UP_QTY: "+up_qty.to_s)
             @last_update = pivot_date
           end
         end
