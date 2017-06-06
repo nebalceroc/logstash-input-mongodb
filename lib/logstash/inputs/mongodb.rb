@@ -349,7 +349,8 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
               up_qty++
               queue << process_doc(doc)
             end
-            @logger.info("FROM "+@last_update.to_s+" TO "+pivot_date.to_s)
+            s = "FROM " + @last_update.to_s + " TO " + pivot_date.to_s
+            @logger.info(s)
             @logger.info("UP_QTY: "+up_qty.to_s)
             @last_update = pivot_date
           end
