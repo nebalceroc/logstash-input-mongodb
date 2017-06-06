@@ -339,17 +339,17 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
           pivot_date = Time.now
 
           #Collection documents update check (3600 secs = 1 hour)
-          if @last_update.to_i + @update_time < pivot_date.to_i
+          if @last_update.to_i + @update_time.to_i < pivot_date.to_i
             s = "UPDATE TRIGGERED " + @last_update.to_s + "-" + pivot_date.to_s
             logger.info(s)
             updated_data = get_updated_documents(@mongodb, collection_name, @last_update, pivot_date)
             #logger.info(updated_data)
             up_qty = 0
             updated_data.each do |doc|
-              up_qty++
+              up_qty = up_qty + 1
               queue << process_doc(doc)
             end
-            @logger.info("UP_QTY: "+up_qty.to_s)
+            @logger.info("UP_QTY: #{up_qty}")
             @last_update = pivot_date
           end
         end
