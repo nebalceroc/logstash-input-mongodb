@@ -77,6 +77,11 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
   config :update_time, :validate => :number, :default => 3600, :required => false
 
+  config :mongo_user, :validate => :string, :required => true
+
+  config :mongo_password, :validate => :string, :required => true
+
+
   SINCE_TABLE = :since_table
 
   public
@@ -190,6 +195,11 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     require "jdbc/sqlite3"
     require "sequel"
     placeholder_db_path = File.join(@placeholder_db_dir, @placeholder_db_name)
+    #client_options = {
+    #  user: @mongo_user,
+    #  password: @mongo_password
+    #}
+    #conn = Mongo::Client.new(@uri,client_options)
     conn = Mongo::Client.new(@uri)
 
     @host = Socket.gethostname
@@ -336,7 +346,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
           # Store the last-seen doc in the database
           update_placeholder(@sqlitedb, since_table, collection_name, @collection_data[index][:last_id])
 
-          pivot_date = Time.now
+          pivot_date = Time.now.getutc
 
           #Collection documents update check (3600 secs = 1 hour)
           if @last_update.to_i + @update_time.to_i < pivot_date.to_i
