@@ -81,6 +81,8 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
   config :mongo_password, :validate => :string, :required => true
 
+  config :update_flag, :validate => :string, :required => true
+
 
   SINCE_TABLE = :since_table
 
@@ -161,19 +163,39 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
   end
 
   public
-  def get_updated_documents(mongodb, my_collection, start_date, end_date)
-    today_date = Time.now.getutc
+  def get_updated_documents(mongodb, my_collection)
     doc_list = {}
-    @logger.info("GETTING " + my_collection + start_date.to_s + end_date.to_s)
+    @logger.info("GETTING " + my_collection)
     col = mongodb[my_collection]
-    @logger.info(start_date.to_s)
-    @logger.info(end_date.to_s)
     #doc_list = col.find(:visto => {:$gte => start_date,:$lt => end_date})
-    doc_list = col.find(:visto => {:$gte => Time.new(start_date.year,start_date.month,start_date.day,start_date.hour,start_date.min,0),
-                                   :$lt => Time.new(end_date.year,end_date.month,end_date.day,end_date.hour,end_date.min,0)})
-    #doc_list = col.find(:visto => {:$gte => Time.new(today_date.year,today_date.month,today_date.day,0,0,0),
-          #                          :$lt => Time.new(today_date.year,today_date.month,today_date.day+1,0,0,0)})
+    doc_list = col.find(@update_flag => true)
     return doc_list
+  end
+
+  public
+  def burn_those_flags_down(mongodb, my_collection)
+    col = mongodb[my_collection]
+    result = col.update_many( {@update_flag => true}, { '$set' => { @update_flag => false }}, {:upsert => false} )
+    @logger.info("FLAGS DOWN: #{result.modified_count}")
+  end
+
+  public
+  def send_updated_documents(queue, mongodb, my_collection)
+    doc_list = {}
+    @logger.info("GETTING " + my_collection)
+    col = mongodb[my_collection]
+    #doc_list = col.find(:visto => {:$gte => start_date,:$lt => end_date})
+    doc_list = col.find(@update_flag => true)
+    up_qty = 0
+
+    doc_list.each do |doc|
+      up_qty = up_qty + 1
+      queue << process_doc(doc)
+    end
+    @logger.info("UP_QTY: #{up_qty}")
+
+    result = col.update_many( {@update_flag => true}, { '$set' => { @update_flag => false }}, {:upsert => false} )
+    @logger.info("FLAGS DOWN: #{result.modified_count}")
   end
 
   public
@@ -352,14 +374,16 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
           if @last_update.to_i + @update_time.to_i < pivot_date.to_i
             s = "UPDATE TRIGGERED " + @last_update.to_s + "-" + pivot_date.to_s
             logger.info(s)
-            updated_data = get_updated_documents(@mongodb, collection_name, @last_update, pivot_date)
-            #logger.info(updated_data)
+            updated_data = get_updated_documents(@mongodb, collection_name)
+            #send_updated_documents(queue, @mongodb, collection_name)
             up_qty = 0
             updated_data.each do |doc|
+              adoc = doc.dup
               up_qty = up_qty + 1
-              queue << process_doc(doc)
+              queue << process_doc(adoc)
             end
             @logger.info("UP_QTY: #{up_qty}")
+            burn_those_flags_down(@mongodb, collection_name)
             @last_update = pivot_date
           end
         end
