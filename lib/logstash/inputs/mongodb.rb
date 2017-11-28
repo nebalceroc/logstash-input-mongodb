@@ -83,6 +83,8 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
   config :update_flag, :validate => :string, :required => true
 
+  config :ls_stamp, :validate => :string, :default => 'ls_stamp'
+
 
   SINCE_TABLE = :since_table
 
@@ -165,7 +167,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
   public
   def get_updated_documents(mongodb, my_collection)
     doc_list = {}
-    @logger.info("GETTING " + my_collection)
+    #@logger.info("GETTING " + my_collection)
     col = mongodb[my_collection]
     #doc_list = col.find(:visto => {:$gte => start_date,:$lt => end_date})
     doc_list = col.find(@update_flag => true)
@@ -173,10 +175,10 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
   end
 
   public
-  def burn_those_flags_down(mongodb, my_collection)
+  def burn_those_flags_down(mongodb, my_collection, stamp)
     col = mongodb[my_collection]
     result = col.update_many( {@update_flag => true}, { '$set' => { @update_flag => false }}, {:upsert => false} )
-    @logger.info("FLAGS DOWN: #{result.modified_count}")
+    @logger.info("INPUT_PLUGIN (#{my_collection} #{stamp}) FLAGS DOWN: #{result.modified_count}")
   end
 
   public
@@ -192,10 +194,10 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
       up_qty = up_qty + 1
       queue << process_doc(doc)
     end
-    @logger.info("UP_QTY: #{up_qty}")
+    @logger.info("INPUT_PLUGIN UP_QTY: #{up_qty}")
 
     result = col.update_many( {@update_flag => true}, { '$set' => { @update_flag => false }}, {:upsert => false} )
-    @logger.info("FLAGS DOWN: #{result.modified_count}")
+    @logger.info("INPUT_PLUGIN FLAGS DOWN: #{result.modified_count}")
   end
 
   public
@@ -353,7 +355,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
           end
           cursor = get_cursor_for_collection(@mongodb, collection_name, last_id_object, batch_size)
           cursor.each do |doc|
-
+            doc[@ls_stamp] = "INIT"
             queue << process_doc(doc)
 
             since_id = doc[since_column]
@@ -372,18 +374,20 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
           #Collection documents update check (3600 secs = 1 hour)
           if @last_update.to_i + @update_time.to_i < pivot_date.to_i
-            s = "UPDATE TRIGGERED " + @last_update.to_s + "-" + pivot_date.to_s
-            logger.info(s)
+            d1 = @last_update.to_s
+            d2 = pivot_date.to_s
+            logger.info("INPUT_PLUGIN (#{collection_name} #{d2}) UPDATE TRIGGERED:  #{d1} - #{d2}")
             updated_data = get_updated_documents(@mongodb, collection_name)
             #send_updated_documents(queue, @mongodb, collection_name)
             up_qty = 0
             updated_data.each do |doc|
               adoc = doc.dup
+              adoc[@ls_stamp] = pivot_date.to_s
               up_qty = up_qty + 1
               queue << process_doc(adoc)
             end
-            @logger.info("UP_QTY: #{up_qty}")
-            burn_those_flags_down(@mongodb, collection_name)
+            @logger.info("INPUT_PLUGIN (#{collection_name} #{d2}) UP_QTY: #{up_qty}")
+            burn_those_flags_down(@mongodb, collection_name, d2)
             @last_update = pivot_date
           end
         end
