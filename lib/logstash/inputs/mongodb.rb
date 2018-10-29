@@ -85,6 +85,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
   config :ls_stamp, :validate => :string, :default => 'ls_stamp'
 
+  config :since_date, :validate => :string, :default => '2018-01-01'
 
   SINCE_TABLE = :since_table
 
@@ -106,7 +107,15 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     since = sqlitedb[SINCE_TABLE]
     mongo_collection = mongodb.collection(mongo_collection_name)
 
-    first_entry = mongo_collection.find({}).sort(since_column => 1).limit(1).first
+    #find query
+    initial_date = Date.strptime(@since_date, '%Y-%m-%d')
+    @logger.debug("since date #{initial_date}")
+    if @collection == "products"
+      first_entry = mongo_collection.find({}).sort(since_column => 1).limit(1).first
+    else
+      first_entry = mongo_collection.find({:visto=>{:$gte=>initial_date}}).sort(since_column => 1).limit(1).first
+    end
+
     first_entry_id = ''
     if since_type == 'id'
       first_entry_id = first_entry[since_column].to_s
@@ -161,7 +170,13 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     collection = mongodb.collection(mongo_collection_name)
     # Need to make this sort by date in object id then get the first of the series
     # db.events_20150320.find().limit(1).sort({ts:1})
-    return collection.find({:_id => {:$gt => last_id_object}}).limit(batch_size)
+    initial_date = Date.strptime(@since_date, '%Y-%m-%d')
+    if @collection == "products"
+      return collection.find({:_id => {:$gt => last_id_object}}).limit(batch_size)
+    else
+      return collection.find({:_id => {:$gt => last_id_object},:visto=>{:$gte=>initial_date}}).limit(batch_size)
+    end
+
   end
 
   public
