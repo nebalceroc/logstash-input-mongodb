@@ -85,7 +85,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
   config :ls_stamp, :validate => :string, :default => 'ls_stamp'
 
-  config :since_date, :validate => :string, :default => '2018-01-01'
+  config :since_date, :validate => :string, :default => 'default'
 
   SINCE_TABLE = :since_table
 
@@ -108,8 +108,9 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     mongo_collection = mongodb.collection(mongo_collection_name)
 
     #find query
+    @logger.info("since date #{since_date}")
     initial_date = Date.strptime(@since_date, '%Y-%m-%d')
-    @logger.debug("since date #{initial_date}")
+    @logger.info("initial_date date #{initial_date}")
     if @collection == "products"
       first_entry = mongo_collection.find({}).sort(since_column => 1).limit(1).first
     else
@@ -247,11 +248,16 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     @mongodb = conn.database
     @sqlitedb = Sequel.connect("jdbc:sqlite:#{placeholder_db_path}")
 
+    if @since_date == "default"
+      now = Date.today
+      ninety_days_ago = (now - 90)
+      @since_date = ninety_days_ago.strftime("%Y-%m-%d")
+    end
+
     # Should check to see if there are new matching tables at a predefined interval or on some trigger
     @collection_data = update_watched_collections(@mongodb, @collection, @sqlitedb)
     #@last_update = Time.new(2000)
     @last_update = Time.now.getutc
-
   end # def register
 
   class BSON::OrderedHash
