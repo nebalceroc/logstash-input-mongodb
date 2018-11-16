@@ -85,7 +85,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
 
   config :ls_stamp, :validate => :string, :default => 'ls_stamp'
 
-  config :since_date, :validate => :string, :default => '2018-01-01'
+  config :since_date, :validate => :string, :default => 'default'
 
   SINCE_TABLE = :since_table
 
@@ -251,6 +251,12 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     @collection_data = update_watched_collections(@mongodb, @collection, @sqlitedb)
     #@last_update = Time.new(2000)
     @last_update = Time.now.getutc
+
+    if @since_date == "default"
+      now = Date.today
+      ninety_days_ago = (now - 90)
+      @since_date = ninety_days_ago.strftime("%Y-%m-%d")
+    end
 
   end # def register
 
