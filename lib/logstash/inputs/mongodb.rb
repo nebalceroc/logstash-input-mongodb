@@ -112,9 +112,9 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     initial_date = Date.strptime(@since_date, '%Y-%m-%d')
     @logger.info("initial_date date #{initial_date}")
     if @collection == "products"
-      first_entry = mongo_collection.find({}).sort(since_column => 1).limit(1).first
+      first_entry = mongo_collection.find({:estado => {:$ne=>"B"}}).sort(since_column => 1).limit(1).first
     else
-      first_entry = mongo_collection.find({:visto=>{:$gte=>initial_date}}).sort(since_column => 1).limit(1).first
+      first_entry = mongo_collection.find({:visto=>{:$gte=>initial_date},:estado => {:$ne=>"B"}}).sort(since_column => 1).limit(1).first
     end
 
     first_entry_id = ''
@@ -173,9 +173,9 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     # db.events_20150320.find().limit(1).sort({ts:1})
     initial_date = Date.strptime(@since_date, '%Y-%m-%d')
     if @collection == "products"
-      return collection.find({:_id => {:$gt => last_id_object}}).limit(batch_size)
+      return collection.find({:_id => {:$gt => last_id_object},:estado=>{:$ne=>"B"}}).limit(batch_size)
     else
-      return collection.find({:_id => {:$gt => last_id_object},:visto=>{:$gte=>initial_date}}).limit(batch_size)
+      return collection.find({:_id => {:$gt => last_id_object},:visto=>{:$gte=>initial_date},:estado=>{:$ne=>"B"}}).limit(batch_size)
     end
 
   end
@@ -186,7 +186,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     #@logger.info("GETTING " + my_collection)
     col = mongodb[my_collection]
     #doc_list = col.find(:visto => {:$gte => start_date,:$lt => end_date})
-    doc_list = col.find(@update_flag => true)
+    doc_list = col.find(@update_flag => true, :estado => {:$ne=>"B"})
     return doc_list
   end
 
@@ -203,7 +203,7 @@ class LogStash::Inputs::MongoDB < LogStash::Inputs::Base
     @logger.info("GETTING " + my_collection)
     col = mongodb[my_collection]
     #doc_list = col.find(:visto => {:$gte => start_date,:$lt => end_date})
-    doc_list = col.find(@update_flag => true)
+    doc_list = col.find(@update_flag => true, :estado => {:$ne=>"B"})
     up_qty = 0
 
     doc_list.each do |doc|
